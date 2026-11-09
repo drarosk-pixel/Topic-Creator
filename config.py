@@ -49,7 +49,7 @@ class Config:
             owner_id=_require_int("OWNER_ID"),
             sessions_dir=sessions_dir,
             progress_edit_interval=float(os.getenv("PROGRESS_EDIT_INTERVAL", "2.5") or 2.5),
-            copy_delay=float(os.getenv("COPY_DELAY", "0.4") or 0.4),
+            copy_delay=float(os.getenv("COPY_DELAY", "1.0") or 1.0),
         )
 
     @property

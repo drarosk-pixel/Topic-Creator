@@ -45,13 +45,22 @@ def topics_keyboard(topics: list[TopicRef], page: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def confirm_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
+def confirm_keyboard(has_checkpoint: bool = False) -> InlineKeyboardMarkup:
+    if has_checkpoint:
+        rows = [
+            [InlineKeyboardButton("▶️ Resume", callback_data="confirm:resume")],
+            [InlineKeyboardButton("🔁 Start over", callback_data="confirm:restart")],
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="confirm:back"),
+                InlineKeyboardButton("❌ Cancel", callback_data="confirm:cancel"),
+            ],
+        ]
+    else:
+        rows = [
             [InlineKeyboardButton("✅ Copy", callback_data="confirm:copy")],
             [
                 InlineKeyboardButton("🔙 Back", callback_data="confirm:back"),
                 InlineKeyboardButton("❌ Cancel", callback_data="confirm:cancel"),
             ],
         ]
-    )
+    return InlineKeyboardMarkup(rows)

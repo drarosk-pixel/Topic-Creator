@@ -97,10 +97,36 @@ Then open your bot in Telegram:
   account. `/logout` removes it.
 - Never commit your `.env` or the `sessions/` directory.
 
-## Notes & limits
+## Speed & FloodWait
 
-- A userbot copying large channels can hit Telegram rate limits; the bot waits
-  out `FloodWait` automatically. Increase `COPY_DELAY` if you copy very large
-  channels and want to be gentler.
+Telegram rate-limits how fast an account can copy. These limits are server-side
+and undocumented, so **no tool can guarantee zero FloodWaits** — copying *too*
+fast is exactly what triggers them. Instead, the bot **auto-tunes**:
+
+- It starts at `COPY_DELAY` seconds between copies.
+- On a `FloodWait` it backs off (slows down) so the next ones shrink or vanish.
+- After a long clean streak it speeds back up a little.
+
+The result settles near the fastest rate your account tolerates. To tune:
+lower `COPY_DELAY` for more speed (more FloodWait risk), raise it for a steadier
+run. Older/established accounts and Telegram Premium get higher limits; fresh
+accounts get throttled hard.
+
+## Resume (no duplicates)
+
+Progress is checkpointed per *(source, destination, topic)*. If a copy is
+interrupted — FloodWait give-up, restart, host redeploy — the next time you
+reach the confirm screen for the same pair you'll see **▶️ Resume** (continues
+where it stopped, no duplicates) and **🔁 Start over**. A completed copy clears
+its checkpoint automatically.
+
+> The checkpoint lives in `sessions/`. On hosts with an **ephemeral filesystem**
+> it is lost on restart (like the login session) — use a host with a persistent
+> disk/volume to keep resume and login working across restarts.
+
+## Notes
+
 - Uses [Kurigram](https://github.com/kurigram-org/kurigram), a maintained
   Pyrogram fork with full forum/topic support.
+- Use a **separate/secondary account** for the userbot, not your primary — heavy
+  copying can make Telegram temporarily show "connecting" on that account.

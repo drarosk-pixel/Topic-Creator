@@ -10,7 +10,14 @@ from pyrogram import Client
 from pyrogram.types import CallbackQuery, Message
 
 from core.app_context import AppContext
-from core.copier import create_topic, fetch_topics, resolve_chat, run_copy
+from core.copier import (
+    clear_checkpoint,
+    create_topic,
+    fetch_topics,
+    load_checkpoint,
+    resolve_chat,
+    run_copy,
+)
 from core.parsing import parse_chat_id
 from core.progress import ProgressReporter
 from core.states import Session, State
@@ -160,7 +167,10 @@ async def _handle_new_topic_title(
     session.topics.insert(0, topic)
     session.chosen_topic = topic
     session.state = State.CONFIRM
-    panel = await message.reply(_confirm_text(session), reply_markup=confirm_keyboard())
+    ckpt = _checkpoint(ctx, session)
+    panel = await message.reply(
+        _confirm_text(session, ckpt), reply_markup=confirm_keyboard(bool(ckpt))
+    )
     session.panel_message_id = panel.id
 
 
@@ -240,7 +250,7 @@ async def _callback_choosing(
         session.chosen_topic = topic
         session.state = State.CONFIRM
         await cq.answer()
-        await cq.message.edit_text(_confirm_text(session), reply_markup=confirm_keyboard())
+        await _show_confirm_edit(ctx, cq, session)
         return
 
     await cq.answer()
@@ -267,25 +277,60 @@ async def _callback_confirm(
         return
 
     if data == "confirm:copy":
-        await _start_copy(ctx, bot, cq, session)
+        await _start_copy(ctx, bot, cq, session, resume=False)
+        return
+
+    if data == "confirm:resume":
+        await _start_copy(ctx, bot, cq, session, resume=True)
+        return
+
+    if data == "confirm:restart":
+        if session.source_id is not None and session.dest_id is not None and session.chosen_topic:
+            clear_checkpoint(
+                ctx.cfg.sessions_dir, session.source_id, session.dest_id, session.chosen_topic.id
+            )
+        await _start_copy(ctx, bot, cq, session, resume=False)
         return
 
     await cq.answer()
 
 
-def _confirm_text(session: Session) -> str:
+def _checkpoint(ctx: AppContext, session: Session):
+    if session.source_id is None or session.dest_id is None or session.chosen_topic is None:
+        return None
+    return load_checkpoint(
+        ctx.cfg.sessions_dir, session.source_id, session.dest_id, session.chosen_topic.id
+    )
+
+
+def _confirm_text(session: Session, ckpt: dict | None = None) -> str:
     topic = session.chosen_topic
-    return (
+    base = (
         "🧾 **Confirm copy**\n\n"
         f"📥 From: **{session.source_title}**\n"
         f"📤 To: **{session.dest_title}**\n"
         f"📌 Topic: **{topic.title if topic else '?'}**\n\n"
+    )
+    if ckpt:
+        return base + (
+            f"♻️ An unfinished copy was found: **{ckpt['done']}/{ckpt['total']}** already done.\n\n"
+            "**▶️ Resume** continues without duplicates.\n"
+            "**🔁 Start over** copies everything again from the beginning."
+        )
+    return base + (
         "All messages from the source will be copied into this topic, in order.\n\n"
         "Press **✅ Copy** to begin."
     )
 
 
-async def _start_copy(ctx: AppContext, bot: Client, cq: CallbackQuery, session: Session) -> None:
+async def _show_confirm_edit(ctx: AppContext, cq: CallbackQuery, session: Session) -> None:
+    ckpt = _checkpoint(ctx, session)
+    await cq.message.edit_text(_confirm_text(session, ckpt), reply_markup=confirm_keyboard(bool(ckpt)))
+
+
+async def _start_copy(
+    ctx: AppContext, bot: Client, cq: CallbackQuery, session: Session, *, resume: bool
+) -> None:
     if session.chosen_topic is None or session.source_id is None or session.dest_id is None:
         await cq.answer("Missing selection — start again with /copy.", show_alert=True)
         session.reset_flow()
@@ -296,7 +341,7 @@ async def _start_copy(ctx: AppContext, bot: Client, cq: CallbackQuery, session: 
     topic = session.chosen_topic
     session.state = State.COPYING
 
-    await cq.answer("Starting…")
+    await cq.answer("Resuming…" if resume else "Starting…")
     header = (
         "🚀 **Copying**\n"
         f"📥 {session.source_title} → 📤 {session.dest_title} / 📌 {topic.title}"
@@ -322,6 +367,8 @@ async def _start_copy(ctx: AppContext, bot: Client, cq: CallbackQuery, session: 
             topic_id=topic.id,
             reporter=reporter,
             copy_delay=ctx.cfg.copy_delay,
+            ckpt_dir=ctx.cfg.sessions_dir,
+            resume=resume,
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("copy failed")
