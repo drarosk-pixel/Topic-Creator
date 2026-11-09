@@ -1,0 +1,21 @@
+# Secrets / session data — NEVER commit these
+.env
+sessions/
+*.session
+*.session-journal
+*.session_string
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+*.log

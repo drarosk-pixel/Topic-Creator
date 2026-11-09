@@ -1,0 +1,6 @@
+# Maintained Pyrogram fork with full forum/topic support (drop-in `pyrogram` import)
+kurigram==2.2.3
+# Faster crypto for Pyrogram/Kurigram
+TgCrypto==1.2.5
+# .env loading
+python-dotenv==1.0.1
