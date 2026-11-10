@@ -1,10 +1,12 @@
 """The copy engine: read a source chat and clone its content into a topic.
 
-Design goals from the spec: highly accurate (nothing skipped, correct order,
-albums kept together) and as fast as Telegram allows. We cannot make FloodWait
-disappear — Telegram's limits are server-side and undocumented — but an
-adaptive throttle keeps the copy running at the fastest rate that avoids them
-in practice, and a checkpoint lets an interrupted copy resume without creating
+Fast path (no transforms): copy by reference, no download.
+Transform path (word/link replace, caption, thumbnail): fetch each message,
+rewrite text/caption (HTML) and optionally re-upload with a new thumbnail.
+
+Accuracy: nothing skipped, correct order, albums kept together. Speed: an
+adaptive throttle keeps the copy near the fastest rate the account tolerates
+without FloodWaits, and a checkpoint lets interrupted copies resume without
 duplicates.
 """
 from __future__ import annotations
@@ -12,20 +14,30 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
+import uuid
 from functools import partial
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, TypeVar
 
-from pyrogram import Client
+from pyrogram import Client, enums
 from pyrogram.errors import FloodWait
+from pyrogram.types import (
+    InputMediaAudio,
+    InputMediaDocument,
+    InputMediaPhoto,
+    InputMediaVideo,
+)
 
 from core.progress import ProgressReporter
+from core.settings import Settings, transform_text
 from core.states import TopicRef
 
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
+_HTML = enums.ParseMode.HTML
 
 
 # --------------------------------------------------------------------------- #
@@ -34,10 +46,8 @@ T = TypeVar("T")
 class AdaptiveThrottle:
     """Self-tuning delay between copies.
 
-    Starts at ``base_delay``. When Telegram hands out a FloodWait we slow down
-    (so the next ones are smaller or gone); after a long clean streak we speed
-    back up a little. The result settles near the fastest rate the account
-    tolerates without FloodWaits.
+    Starts at ``base_delay``. A FloodWait makes it back off; a long clean streak
+    speeds it back up. It settles near the fastest rate the account tolerates.
     """
 
     def __init__(self, base_delay: float, *, min_delay: float = 0.3, max_delay: float = 8.0) -> None:
@@ -51,12 +61,10 @@ class AdaptiveThrottle:
             await asyncio.sleep(self.delay)
 
     def penalize(self) -> None:
-        """A FloodWait happened — back off hard."""
         self.delay = min(self.max, self.delay * 1.6 + 0.5)
         self._ok_streak = 0
 
     def reward(self) -> None:
-        """A clean copy — after a streak, shave a little off the delay."""
         self._ok_streak += 1
         if self._ok_streak >= 30 and self.delay > self.min:
             self.delay = max(self.min, self.delay - 0.1)
@@ -64,7 +72,7 @@ class AdaptiveThrottle:
 
 
 # --------------------------------------------------------------------------- #
-# Generic FloodWait retry (for one-off calls like get_chat / topics)
+# Generic FloodWait + transient retry (one-off calls)
 # --------------------------------------------------------------------------- #
 async def with_floodwait(factory: Callable[[], Awaitable[T]], *, max_retries: int = 8) -> T:
     attempt = 0
@@ -80,8 +88,18 @@ async def with_floodwait(factory: Callable[[], Awaitable[T]], *, max_retries: in
             await asyncio.sleep(wait)
 
 
-async def resolve_chat(client: Client, chat_id):
-    return await with_floodwait(lambda: client.get_chat(chat_id))
+async def resolve_chat(client: Client, chat_id, *, attempts: int = 3):
+    """Resolve a chat, retrying transient timeouts (common for cold peers)."""
+    last_exc: Optional[Exception] = None
+    for i in range(attempts):
+        try:
+            return await with_floodwait(lambda: client.get_chat(chat_id))
+        except (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError) as exc:
+            last_exc = exc
+            log.warning("get_chat(%s) transient error (try %d/%d): %s", chat_id, i + 1, attempts, exc)
+            await asyncio.sleep(2.0 * (i + 1))
+    assert last_exc is not None
+    raise last_exc
 
 
 async def fetch_topics(client: Client, dest_id: int) -> list[TopicRef]:
@@ -141,12 +159,6 @@ def _save_checkpoint(path: Path, last_id: int, done: int, total: int) -> None:
 # Source scanning -> ordered "units" (single message or whole album)
 # --------------------------------------------------------------------------- #
 async def _collect_units(client: Client, source_id: int) -> list[dict]:
-    """Return ordered copy units, oldest first.
-
-    Each unit is ``{"anchor": int, "ids": [int, ...], "is_album": bool}``.
-    Album members are grouped so the album is copied once, in order, and the
-    whole album is counted when deciding resume points.
-    """
     raw: list[tuple[int, Optional[str]]] = []
     async for message in client.get_chat_history(source_id):
         if getattr(message, "service", None) or getattr(message, "empty", False):
@@ -169,6 +181,145 @@ async def _collect_units(client: Client, source_id: int) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Sending (fast path vs transform path)
+# --------------------------------------------------------------------------- #
+def _media_type(msg) -> Optional[str]:
+    for name in ("video", "document", "animation", "photo", "audio", "voice", "sticker", "video_note"):
+        if getattr(msg, name, None):
+            return name
+    return None
+
+
+def _build_input_media(m, caption: str):
+    if m.photo:
+        return InputMediaPhoto(m.photo.file_id, caption=caption, parse_mode=_HTML)
+    if m.video:
+        return InputMediaVideo(m.video.file_id, caption=caption, parse_mode=_HTML)
+    if m.document:
+        return InputMediaDocument(m.document.file_id, caption=caption, parse_mode=_HTML)
+    if m.audio:
+        return InputMediaAudio(m.audio.file_id, caption=caption, parse_mode=_HTML)
+    return None
+
+
+async def _resend_with_thumbnail(
+    client: Client, msg, *, dest_id: int, topic_id: int, caption: str, thumb: str, media_type: str
+) -> None:
+    tmp = str(Path(thumb).parent / f"dl_{uuid.uuid4().hex}")
+    path = await client.download_media(msg, file_name=tmp)
+    try:
+        if media_type == "video":
+            v = msg.video
+            await client.send_video(
+                dest_id, path, thumb=thumb, caption=caption, parse_mode=_HTML,
+                duration=getattr(v, "duration", 0) or 0,
+                width=getattr(v, "width", 0) or 0,
+                height=getattr(v, "height", 0) or 0,
+                supports_streaming=True, message_thread_id=topic_id,
+            )
+        elif media_type == "animation":
+            a = msg.animation
+            await client.send_animation(
+                dest_id, path, thumb=thumb, caption=caption, parse_mode=_HTML,
+                duration=getattr(a, "duration", 0) or 0,
+                width=getattr(a, "width", 0) or 0,
+                height=getattr(a, "height", 0) or 0,
+                message_thread_id=topic_id,
+            )
+        else:  # document
+            d = msg.document
+            await client.send_document(
+                dest_id, path, thumb=thumb, caption=caption, parse_mode=_HTML,
+                file_name=getattr(d, "file_name", None), message_thread_id=topic_id,
+            )
+    finally:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+async def _send_single_transformed(
+    client: Client, anchor: int, *, source_id: int, dest_id: int, topic_id: int, settings: Settings
+) -> None:
+    msg = await client.get_messages(source_id, anchor)
+
+    if not msg.media:  # text message
+        new_text = transform_text(msg.text.html if msg.text else "", settings)
+        await client.send_message(dest_id, new_text, parse_mode=_HTML, message_thread_id=topic_id)
+        return
+
+    original_caption = msg.caption.html if msg.caption else ""
+    new_caption = transform_text(original_caption, settings)
+    media_type = _media_type(msg)
+
+    if settings.thumbnail_path and media_type in ("video", "document", "animation"):
+        await _resend_with_thumbnail(
+            client, msg, dest_id=dest_id, topic_id=topic_id,
+            caption=new_caption, thumb=settings.thumbnail_path, media_type=media_type,
+        )
+    else:
+        await client.copy_message(
+            chat_id=dest_id, from_chat_id=source_id, message_id=anchor,
+            caption=new_caption, parse_mode=_HTML, message_thread_id=topic_id,
+        )
+
+
+async def _send_album_transformed(
+    client: Client, anchor: int, *, source_id: int, dest_id: int, topic_id: int, settings: Settings
+) -> None:
+    msgs = await client.get_media_group(source_id, anchor)
+    original_caption = ""
+    for m in msgs:
+        if m.caption:
+            original_caption = m.caption.html
+            break
+    new_caption = transform_text(original_caption, settings)
+
+    items = []
+    for i, m in enumerate(msgs):
+        media = _build_input_media(m, new_caption if i == 0 else "")
+        if media is None:
+            # Unsupported media in album: fall back to a plain reference copy.
+            await client.copy_media_group(
+                chat_id=dest_id, from_chat_id=source_id, message_id=anchor,
+                captions=new_caption, message_thread_id=topic_id,
+            )
+            return
+        items.append(media)
+    await client.send_media_group(dest_id, items, message_thread_id=topic_id)
+
+
+async def _send_unit(
+    client: Client, unit: dict, *, source_id: int, dest_id: int, topic_id: int,
+    settings: Optional[Settings],
+) -> None:
+    anchor = unit["anchor"]
+    if settings is None or not settings.has_transforms():
+        if unit["is_album"]:
+            await client.copy_media_group(
+                chat_id=dest_id, from_chat_id=source_id, message_id=anchor,
+                message_thread_id=topic_id,
+            )
+        else:
+            await client.copy_message(
+                chat_id=dest_id, from_chat_id=source_id, message_id=anchor,
+                message_thread_id=topic_id,
+            )
+        return
+
+    if unit["is_album"]:
+        await _send_album_transformed(
+            client, anchor, source_id=source_id, dest_id=dest_id, topic_id=topic_id, settings=settings
+        )
+    else:
+        await _send_single_transformed(
+            client, anchor, source_id=source_id, dest_id=dest_id, topic_id=topic_id, settings=settings
+        )
+
+
+# --------------------------------------------------------------------------- #
 # Main copy routine
 # --------------------------------------------------------------------------- #
 async def run_copy(
@@ -181,11 +332,12 @@ async def run_copy(
     copy_delay: float = 1.0,
     ckpt_dir: Optional[Path] = None,
     resume: bool = False,
+    settings: Optional[Settings] = None,
     floodwait_max_retries: int = 12,
 ) -> tuple[int, int, float]:
     """Copy all source messages into the destination topic.
 
-    Returns ``(copied_or_skipped_count, total, elapsed_seconds)``.
+    Returns ``(done, total, elapsed_seconds)``.
     """
     start = time.monotonic()
     throttle = AdaptiveThrottle(copy_delay)
@@ -198,13 +350,12 @@ async def run_copy(
         await reporter.fail("The source channel has no copyable messages.")
         return 0, 0, time.monotonic() - start
 
-    # Resume point.
     last_id = 0
     done = 0
     ckpt_file = (
         checkpoint_path(ckpt_dir, source_id, dest_id, topic_id) if ckpt_dir is not None else None
     )
-    if resume and ckpt_file is not None:
+    if resume and ckpt_dir is not None:
         saved = load_checkpoint(ckpt_dir, source_id, dest_id, topic_id)
         if saved:
             last_id = int(saved["last_id"])
@@ -217,29 +368,14 @@ async def run_copy(
         unit_max = max(unit["ids"])
         size = len(unit["ids"])
 
-        # Already copied in a previous (interrupted) run.
-        if unit_max <= last_id:
+        if unit_max <= last_id:  # already copied in a previous run
             continue
 
-        anchor = unit["anchor"]
-        if unit["is_album"]:
-            action = partial(
-                client.copy_media_group,
-                chat_id=dest_id,
-                from_chat_id=source_id,
-                message_id=anchor,
-                message_thread_id=topic_id,
-            )
-        else:
-            action = partial(
-                client.copy_message,
-                chat_id=dest_id,
-                from_chat_id=source_id,
-                message_id=anchor,
-                message_thread_id=topic_id,
-            )
+        action = partial(
+            _send_unit, client, unit,
+            source_id=source_id, dest_id=dest_id, topic_id=topic_id, settings=settings,
+        )
 
-        # Copy with adaptive FloodWait handling.
         attempt = 0
         while True:
             try:
@@ -251,15 +387,15 @@ async def run_copy(
                 throttle.penalize()
                 if attempt > floodwait_max_retries:
                     failed += size
-                    log.error("Giving up on unit %s after %d FloodWaits", anchor, attempt)
+                    log.error("Giving up on unit %s after %d FloodWaits", unit["anchor"], attempt)
                     break
                 wait = float(exc.value) + 1.0
-                log.warning("FloodWait %0.fs on unit %s (attempt %d); delay now %.2fs",
-                            wait, anchor, attempt, throttle.delay)
+                log.warning("FloodWait %.0fs on unit %s (attempt %d); delay now %.2fs",
+                            wait, unit["anchor"], attempt, throttle.delay)
                 await asyncio.sleep(wait)
             except Exception as exc:  # noqa: BLE001 - one bad unit must not abort the job
                 failed += size
-                log.warning("Failed to copy unit %s: %s", anchor, exc)
+                log.warning("Failed to copy unit %s: %s", unit["anchor"], exc)
                 break
 
         done += size

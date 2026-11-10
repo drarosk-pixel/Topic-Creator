@@ -1,8 +1,8 @@
 """Registers all bot handlers and dispatches messages/callbacks by FSM state.
 
 Everything lives in handler group 0 and command handlers are registered before
-the catch-all text handler, so Pyrogram runs exactly one handler per update and
-the strict step sequence is preserved.
+the catch-all handlers, so Pyrogram runs exactly one handler per update and the
+strict step sequence is preserved.
 """
 from __future__ import annotations
 
@@ -13,12 +13,17 @@ from pyrogram.types import CallbackQuery, Message
 
 from core.app_context import AppContext
 from core.states import State
-from handlers import flow, login
+from handlers import flow, login, settings as settings_handler
 
 log = logging.getLogger(__name__)
 
 _LOGIN_TEXT_STATES = {State.LOGIN_PHONE, State.LOGIN_CODE, State.LOGIN_PASSWORD}
 _FLOW_TEXT_STATES = {State.ASK_SOURCE, State.ASK_DEST, State.ASK_NEW_TOPIC_TITLE}
+_SETTINGS_TEXT_STATES = {
+    State.SET_WORD_REPLACE,
+    State.SET_LINK_REPLACE,
+    State.SET_CAPTION_TEXT,
+}
 
 
 def register(bot: Client, ctx: AppContext) -> None:
@@ -36,6 +41,7 @@ def register(bot: Client, ctx: AppContext) -> None:
             "**Commands**\n"
             "• /login — sign the userbot in (phone + code)\n"
             "• /copy — copy a channel into a topic\n"
+            "• /settings — word/link replace, caption, thumbnail\n"
             "• /status — show current status\n"
             "• /logout — sign the userbot out\n"
             "• /cancel — abort the current step\n\n"
@@ -86,6 +92,20 @@ def register(bot: Client, ctx: AppContext) -> None:
         session = ctx.store.get(message.from_user.id)
         await flow.cmd_copy(ctx, bot, message, session)
 
+    @bot.on_message(owner & filters.command("settings"))
+    async def _settings(_: Client, message: Message) -> None:
+        session = ctx.store.get(message.from_user.id)
+        await settings_handler.cmd_settings(ctx, bot, message, session)
+
+    # ----------------------- thumbnail photo input ---------------------- #
+    @bot.on_message(owner & filters.photo)
+    async def _photo(_: Client, message: Message) -> None:
+        session = ctx.store.get(message.from_user.id)
+        if session.state is State.SET_THUMBNAIL:
+            await settings_handler.on_thumbnail_photo(ctx, bot, message, session)
+        else:
+            await message.reply("ℹ️ Send /settings → 🖼 Thumbnail first if you want to set a thumbnail.")
+
     # ----------------------- catch-all text router ---------------------- #
     @bot.on_message(owner & filters.text)
     async def _text(_: Client, message: Message) -> None:
@@ -97,15 +117,21 @@ def register(bot: Client, ctx: AppContext) -> None:
             await login.on_text(ctx, bot, message, session)
         elif session.state in _FLOW_TEXT_STATES:
             await flow.on_text(ctx, bot, message, session)
+        elif session.state in _SETTINGS_TEXT_STATES:
+            await settings_handler.on_text(ctx, bot, message, session)
         else:
-            await message.reply("ℹ️ Send /copy to start, or /start for the menu.")
+            await message.reply("ℹ️ Send /copy to start, /settings to configure, or /start for the menu.")
 
     # --------------------------- callbacks ------------------------------ #
     @bot.on_callback_query(filters.user(ctx.cfg.owner_id))
     async def _callback(_: Client, cq: CallbackQuery) -> None:
         session = ctx.store.get(cq.from_user.id)
+        data = cq.data or ""
         try:
-            await flow.on_callback(ctx, bot, cq, session)
+            if data.startswith("set:") or data.startswith("capmode:"):
+                await settings_handler.on_callback(ctx, bot, cq, session)
+            else:
+                await flow.on_callback(ctx, bot, cq, session)
         except Exception:  # noqa: BLE001
             log.exception("callback handler failed")
             try:

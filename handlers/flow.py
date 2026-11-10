@@ -169,7 +169,8 @@ async def _handle_new_topic_title(
     session.state = State.CONFIRM
     ckpt = _checkpoint(ctx, session)
     panel = await message.reply(
-        _confirm_text(session, ckpt), reply_markup=confirm_keyboard(bool(ckpt))
+        _confirm_text(session, ckpt, _active_transforms_note(ctx)),
+        reply_markup=confirm_keyboard(bool(ckpt)),
     )
     session.panel_message_id = panel.id
 
@@ -303,13 +304,30 @@ def _checkpoint(ctx: AppContext, session: Session):
     )
 
 
-def _confirm_text(session: Session, ckpt: dict | None = None) -> str:
+def _active_transforms_note(ctx: AppContext) -> str:
+    s = ctx.settings
+    active = []
+    if s.word_replace:
+        active.append(f"word×{len(s.word_replace)}")
+    if s.link_replace:
+        active.append(f"link×{len(s.link_replace)}")
+    if s.caption_mode != "off" and s.caption_text:
+        active.append(f"caption:{s.caption_mode}")
+    if s.thumbnail_path:
+        active.append("thumbnail")
+    if not active:
+        return ""
+    return "⚙️ Transforms on: **" + ", ".join(active) + "** (edit via /settings)\n\n"
+
+
+def _confirm_text(session: Session, ckpt: dict | None = None, transforms_note: str = "") -> str:
     topic = session.chosen_topic
     base = (
         "🧾 **Confirm copy**\n\n"
         f"📥 From: **{session.source_title}**\n"
         f"📤 To: **{session.dest_title}**\n"
         f"📌 Topic: **{topic.title if topic else '?'}**\n\n"
+        + transforms_note
     )
     if ckpt:
         return base + (
@@ -325,7 +343,10 @@ def _confirm_text(session: Session, ckpt: dict | None = None) -> str:
 
 async def _show_confirm_edit(ctx: AppContext, cq: CallbackQuery, session: Session) -> None:
     ckpt = _checkpoint(ctx, session)
-    await cq.message.edit_text(_confirm_text(session, ckpt), reply_markup=confirm_keyboard(bool(ckpt)))
+    await cq.message.edit_text(
+        _confirm_text(session, ckpt, _active_transforms_note(ctx)),
+        reply_markup=confirm_keyboard(bool(ckpt)),
+    )
 
 
 async def _start_copy(
@@ -369,6 +390,7 @@ async def _start_copy(
             copy_delay=ctx.cfg.copy_delay,
             ckpt_dir=ctx.cfg.sessions_dir,
             resume=resume,
+            settings=ctx.settings,
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("copy failed")

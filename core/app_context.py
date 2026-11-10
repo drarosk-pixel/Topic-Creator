@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config import Config
+from core.settings import Settings
 from core.states import SessionStore
 from core.userbot import UserBot
 
@@ -13,3 +14,4 @@ class AppContext:
     cfg: Config
     store: SessionStore
     userbot: UserBot
+    settings: Settings

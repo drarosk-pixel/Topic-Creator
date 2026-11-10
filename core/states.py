@@ -28,6 +28,12 @@ class State(Enum):
     CONFIRM = auto()
     COPYING = auto()
 
+    # --- settings sub-flow ---
+    SET_WORD_REPLACE = auto()
+    SET_LINK_REPLACE = auto()
+    SET_CAPTION_TEXT = auto()
+    SET_THUMBNAIL = auto()
+
 
 @dataclass
 class TopicRef:
@@ -58,6 +64,9 @@ class Session:
     # a message id we keep editing (topic list / confirm / progress)
     panel_message_id: Optional[int] = None
 
+    # transient: caption text awaiting a mode choice in the settings flow
+    pending_caption: Optional[str] = None
+
     def reset_flow(self) -> None:
         """Clear the copy flow but keep login state untouched."""
         self.state = State.IDLE
@@ -69,6 +78,7 @@ class Session:
         self.topic_page = 0
         self.chosen_topic = None
         self.panel_message_id = None
+        self.pending_caption = None
 
     def reset_login(self) -> None:
         self.phone = None

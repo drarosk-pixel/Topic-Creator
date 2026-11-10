@@ -45,6 +45,40 @@ def topics_keyboard(topics: list[TopicRef], page: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def settings_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✏️ Word replace", callback_data="set:word"),
+                InlineKeyboardButton("🔗 Link replace", callback_data="set:link"),
+            ],
+            [
+                InlineKeyboardButton("🏷 Caption", callback_data="set:caption"),
+                InlineKeyboardButton("🖼 Thumbnail", callback_data="set:thumb"),
+            ],
+            [
+                InlineKeyboardButton("🧹 Clear all", callback_data="set:clearall"),
+                InlineKeyboardButton("✖️ Close", callback_data="set:close"),
+            ],
+        ]
+    )
+
+
+def caption_mode_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("➕ Append", callback_data="capmode:append"),
+                InlineKeyboardButton("⬆️ Prepend", callback_data="capmode:prepend"),
+            ],
+            [
+                InlineKeyboardButton("♻️ Replace", callback_data="capmode:replace"),
+                InlineKeyboardButton("🚫 Off", callback_data="capmode:off"),
+            ],
+        ]
+    )
+
+
 def confirm_keyboard(has_checkpoint: bool = False) -> InlineKeyboardMarkup:
     if has_checkpoint:
         rows = [

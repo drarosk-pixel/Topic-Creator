@@ -39,6 +39,25 @@ def parse_chat_id(raw: str) -> ChatId:
     raise ValueError(f"Could not understand chat identifier: {raw!r}")
 
 
+def parse_pairs(text: str, sep: str = "=>") -> list[list[str]]:
+    """Parse multi-line ``find => replace`` input into ``[[find, replace], ...]``.
+
+    Blank lines are ignored. A line without the separator is treated as
+    ``find => ""`` (i.e. delete the matched text).
+    """
+    pairs: list[list[str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if sep in line:
+            left, right = line.split(sep, 1)
+            pairs.append([left.strip(), right.strip()])
+        else:
+            pairs.append([line, ""])
+    return pairs
+
+
 def strip_code(raw: str) -> str:
     """Extract just the digits of an OTP, tolerating spaces/dashes.
 

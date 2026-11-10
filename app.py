@@ -14,6 +14,7 @@ from pyrogram import Client, idle
 
 from config import Config
 from core.app_context import AppContext
+from core.settings import Settings
 from core.states import SessionStore
 from core.userbot import UserBot
 from handlers.router import register
@@ -31,7 +32,8 @@ async def main() -> None:
     cfg = Config.load()
     store = SessionStore()
     userbot = UserBot(cfg)
-    ctx = AppContext(cfg=cfg, store=store, userbot=userbot)
+    settings = Settings.load(cfg.settings_file)
+    ctx = AppContext(cfg=cfg, store=store, userbot=userbot, settings=settings)
 
     bot = Client(
         name="control-bot",

@@ -86,8 +86,28 @@ Then open your bot in Telegram:
 | `/login` | Sign the userbot in |
 | `/logout` | Sign out and delete the saved session |
 | `/copy` | Start the copy flow |
+| `/settings` | Configure word/link replace, caption, thumbnail |
 | `/status` | Show current step and selections |
 | `/cancel` | Abort the current step |
+
+## Transformations (/settings)
+
+Open `/settings` to configure changes applied to **every** message while
+copying. They persist until you change them.
+
+- **✏️ Word replace** — find/replace rules (one per line, `old => new`). A line
+  without `=>` deletes that text. Applies to message text and captions.
+- **🔗 Link replace** — swap links (`https://old => https://new`). Works on links
+  inside text and captions.
+- **🏷 Caption** — add a caption and choose how: **Append**, **Prepend**, or
+  **Replace** the original. Supports HTML (`<b>…</b>`, `<a href="…">…</a>`).
+- **🖼 Thumbnail** — send a photo to use as the thumbnail for copied
+  videos/documents/animations. ⚠️ This forces a **download + re-upload** of each
+  file, so it is much slower and heavier than a normal copy. Albums keep their
+  original thumbnails.
+
+Text/caption rewriting (word, link, caption) uses fast reference-copies — no
+download. Only the thumbnail feature downloads and re-uploads.
 
 ## Security notes
 
@@ -130,3 +150,7 @@ its checkpoint automatically.
   Pyrogram fork with full forum/topic support.
 - Use a **separate/secondary account** for the userbot, not your primary — heavy
   copying can make Telegram temporarily show "connecting" on that account.
+- Resolving a source/destination by numeric id can occasionally time out for a
+  "cold" peer; the bot now retries a few times automatically. If it still fails,
+  make sure the userbot account is a member and try again (or use @username / a
+  t.me link).
