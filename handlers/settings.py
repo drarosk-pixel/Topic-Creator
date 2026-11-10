@@ -203,10 +203,34 @@ async def on_thumbnail_photo(
 
 
 def _prepare_thumbnail(src: str, dst: str) -> None:
-    """Resize/convert an image into a valid Telegram thumbnail (<=320px JPEG)."""
+    """Make the sharpest valid Telegram thumbnail possible.
+
+    Telegram caps custom thumbnails at 320px and <200 KB JPEG, so we downscale
+    (never upscale) with LANCZOS and save at the highest quality that still fits
+    under the size limit.
+    """
+    import os
+
     from PIL import Image
+
+    max_dim = 320
+    max_bytes = 200 * 1024
 
     with Image.open(src) as img:
         img = img.convert("RGB")
-        img.thumbnail((320, 320))
-        img.save(dst, format="JPEG", quality=80, optimize=True)
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+        quality = 95
+        while True:
+            img.save(
+                dst,
+                format="JPEG",
+                quality=quality,
+                optimize=True,
+                progressive=True,
+                subsampling=0,  # 4:4:4 — no chroma loss
+            )
+            if os.path.getsize(dst) <= max_bytes or quality <= 60:
+                break
+            quality -= 5
