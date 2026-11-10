@@ -1,7 +1,7 @@
 """The /settings flow: configure copy transformations via an inline menu.
 
-Features: word replace, hyperlink replace, caption (append/prepend/replace),
-and a custom thumbnail. Settings are global for the owner and persist to disk.
+Features: word replace, hyperlink replace, and caption (append/prepend/replace).
+Settings are global for the owner and persist to disk.
 """
 from __future__ import annotations
 
@@ -55,7 +55,6 @@ async def on_callback(ctx: AppContext, bot: Client, cq: CallbackQuery, session: 
         ctx.settings.link_replace = []
         ctx.settings.caption_text = ""
         ctx.settings.caption_mode = "off"
-        ctx.settings.thumbnail_path = None
         ctx.settings.save(ctx.cfg.settings_file)
         await cq.answer("All settings cleared")
         await _show_menu_edit(ctx, cq)
@@ -97,19 +96,6 @@ async def on_callback(ctx: AppContext, bot: Client, cq: CallbackQuery, session: 
             "Send the caption text to add. You can use HTML like "
             "`<b>bold</b>` or `<a href=\"https://t.me/x\">link</a>`.\n\n"
             "Send `off` to disable the caption.\n\n"
-            "Send /cancel to go back."
-        )
-        return
-
-    if data == "set:thumb":
-        session.state = State.SET_THUMBNAIL
-        await cq.answer()
-        await cq.message.edit_text(
-            "🖼 **Thumbnail**\n\n"
-            "Send a **photo** to use as the thumbnail for copied videos/documents.\n"
-            "⚠️ Thumbnail change makes the bot **download & re-upload** each file, "
-            "so it is much slower and heavier.\n\n"
-            "Send `clear` to remove the thumbnail.\n\n"
             "Send /cancel to go back."
         )
         return
@@ -179,58 +165,3 @@ async def on_text(ctx: AppContext, bot: Client, message: Message, session: Sessi
             reply_markup=caption_mode_keyboard(),
         )
         return
-
-
-# ------------------------------------------------------------------ #
-# Thumbnail photo input
-# ------------------------------------------------------------------ #
-async def on_thumbnail_photo(
-    ctx: AppContext, bot: Client, message: Message, session: Session
-) -> None:
-    notice = await message.reply("🖼 Preparing thumbnail…")
-    try:
-        raw_path = ctx.cfg.sessions_dir / "thumb_raw"
-        await bot.download_media(message, file_name=str(raw_path))
-        _prepare_thumbnail(str(raw_path), str(ctx.cfg.thumbnail_file))
-        ctx.settings.thumbnail_path = str(ctx.cfg.thumbnail_file)
-        session.state = State.IDLE
-        ctx.settings.save(ctx.cfg.settings_file)
-        await notice.edit_text("✅ Thumbnail set.")
-        await message.reply(_MENU_HEADER + summary(ctx.settings), reply_markup=settings_menu_keyboard())
-    except Exception as exc:  # noqa: BLE001
-        log.exception("thumbnail prepare failed")
-        await notice.edit_text(f"❌ Could not set thumbnail: `{exc}`")
-
-
-def _prepare_thumbnail(src: str, dst: str) -> None:
-    """Make the sharpest valid Telegram thumbnail possible.
-
-    Telegram caps custom thumbnails at 320px and <200 KB JPEG, so we downscale
-    (never upscale) with LANCZOS and save at the highest quality that still fits
-    under the size limit.
-    """
-    import os
-
-    from PIL import Image
-
-    max_dim = 320
-    max_bytes = 200 * 1024
-
-    with Image.open(src) as img:
-        img = img.convert("RGB")
-        if max(img.size) > max_dim:
-            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-
-        quality = 95
-        while True:
-            img.save(
-                dst,
-                format="JPEG",
-                quality=quality,
-                optimize=True,
-                progressive=True,
-                subsampling=0,  # 4:4:4 — no chroma loss
-            )
-            if os.path.getsize(dst) <= max_bytes or quality <= 60:
-                break
-            quality -= 5

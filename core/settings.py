@@ -1,4 +1,4 @@
-"""Owner-configurable copy transformations (word/link replace, caption, thumbnail).
+"""Owner-configurable copy transformations (word/link replace, caption).
 
 Settings are global for the single owner and persisted as JSON in the sessions
 directory. They are applied while copying each message.
@@ -9,7 +9,6 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -25,19 +24,9 @@ class Settings:
     # extra caption text and how to combine it with the original
     caption_text: str = ""
     caption_mode: str = "off"  # off | append | prepend | replace
-    # path to a prepared JPEG thumbnail (<=320px), or None
-    thumbnail_path: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     def has_transforms(self) -> bool:
-        return bool(
-            self.word_replace
-            or self.link_replace
-            or (self.caption_mode != "off" and self.caption_text)
-            or self.thumbnail_path
-        )
-
-    def has_text_transforms(self) -> bool:
         return bool(
             self.word_replace
             or self.link_replace
@@ -56,7 +45,6 @@ class Settings:
                 link_replace=[list(p) for p in data.get("link_replace", [])],
                 caption_text=str(data.get("caption_text", "")),
                 caption_mode=str(data.get("caption_mode", "off")),
-                thumbnail_path=data.get("thumbnail_path"),
             )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             log.warning("Could not read settings (%s); using defaults.", exc)
@@ -71,7 +59,6 @@ class Settings:
                         "link_replace": self.link_replace,
                         "caption_text": self.caption_text,
                         "caption_mode": self.caption_mode,
-                        "thumbnail_path": self.thumbnail_path,
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -132,5 +119,4 @@ def summary(settings: Settings) -> str:
         lines.append(f"🏷 **Caption:** {settings.caption_mode} — `{preview}`")
     else:
         lines.append("🏷 **Caption:** off")
-    lines.append(f"🖼 **Thumbnail:** {'set' if settings.thumbnail_path else 'off'}")
     return "\n".join(lines)

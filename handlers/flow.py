@@ -313,8 +313,6 @@ def _active_transforms_note(ctx: AppContext) -> str:
         active.append(f"link×{len(s.link_replace)}")
     if s.caption_mode != "off" and s.caption_text:
         active.append(f"caption:{s.caption_mode}")
-    if s.thumbnail_path:
-        active.append("thumbnail")
     if not active:
         return ""
     return "⚙️ Transforms on: **" + ", ".join(active) + "** (edit via /settings)\n\n"

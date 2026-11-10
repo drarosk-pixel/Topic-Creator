@@ -52,10 +52,7 @@ def settings_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("✏️ Word replace", callback_data="set:word"),
                 InlineKeyboardButton("🔗 Link replace", callback_data="set:link"),
             ],
-            [
-                InlineKeyboardButton("🏷 Caption", callback_data="set:caption"),
-                InlineKeyboardButton("🖼 Thumbnail", callback_data="set:thumb"),
-            ],
+            [InlineKeyboardButton("🏷 Caption", callback_data="set:caption")],
             [
                 InlineKeyboardButton("🧹 Clear all", callback_data="set:clearall"),
                 InlineKeyboardButton("✖️ Close", callback_data="set:close"),

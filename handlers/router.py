@@ -41,7 +41,7 @@ def register(bot: Client, ctx: AppContext) -> None:
             "**Commands**\n"
             "• /login — sign the userbot in (phone + code)\n"
             "• /copy — copy a channel into a topic\n"
-            "• /settings — word/link replace, caption, thumbnail\n"
+            "• /settings — word/link replace, caption\n"
             "• /status — show current status\n"
             "• /logout — sign the userbot out\n"
             "• /cancel — abort the current step\n\n"
@@ -96,15 +96,6 @@ def register(bot: Client, ctx: AppContext) -> None:
     async def _settings(_: Client, message: Message) -> None:
         session = ctx.store.get(message.from_user.id)
         await settings_handler.cmd_settings(ctx, bot, message, session)
-
-    # ----------------------- thumbnail photo input ---------------------- #
-    @bot.on_message(owner & filters.photo)
-    async def _photo(_: Client, message: Message) -> None:
-        session = ctx.store.get(message.from_user.id)
-        if session.state is State.SET_THUMBNAIL:
-            await settings_handler.on_thumbnail_photo(ctx, bot, message, session)
-        else:
-            await message.reply("ℹ️ Send /settings → 🖼 Thumbnail first if you want to set a thumbnail.")
 
     # ----------------------- catch-all text router ---------------------- #
     @bot.on_message(owner & filters.text)

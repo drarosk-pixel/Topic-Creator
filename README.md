@@ -86,14 +86,15 @@ Then open your bot in Telegram:
 | `/login` | Sign the userbot in |
 | `/logout` | Sign out and delete the saved session |
 | `/copy` | Start the copy flow |
-| `/settings` | Configure word/link replace, caption, thumbnail |
+| `/settings` | Configure word/link replace and caption |
 | `/status` | Show current step and selections |
 | `/cancel` | Abort the current step |
 
 ## Transformations (/settings)
 
 Open `/settings` to configure changes applied to **every** message while
-copying. They persist until you change them.
+copying. They persist until you change them. All of these are **fast** —
+messages are reference-copied, nothing is downloaded or re-uploaded.
 
 - **✏️ Word replace** — find/replace rules (one per line, `old => new`). A line
   without `=>` deletes that text. Applies to message text and captions.
@@ -101,13 +102,11 @@ copying. They persist until you change them.
   inside text and captions.
 - **🏷 Caption** — add a caption and choose how: **Append**, **Prepend**, or
   **Replace** the original. Supports HTML (`<b>…</b>`, `<a href="…">…</a>`).
-- **🖼 Thumbnail** — send a photo to use as the thumbnail for copied
-  videos/documents/animations. ⚠️ This forces a **download + re-upload** of each
-  file, so it is much slower and heavier than a normal copy. Albums keep their
-  original thumbnails.
 
-Text/caption rewriting (word, link, caption) uses fast reference-copies — no
-download. Only the thumbnail feature downloads and re-uploads.
+> **No thumbnail change.** Changing a video/document thumbnail is impossible
+> without downloading and re-uploading each file (the thumbnail is baked into
+> the file reference), so it is intentionally not offered — this keeps every
+> copy fast.
 
 ## Security notes
 

@@ -1,8 +1,8 @@
 """The copy engine: read a source chat and clone its content into a topic.
 
 Fast path (no transforms): copy by reference, no download.
-Transform path (word/link replace, caption, thumbnail): fetch each message,
-rewrite text/caption (HTML) and optionally re-upload with a new thumbnail.
+Transform path (word/link replace, caption): fetch each message and rewrite its
+text/caption (HTML), still by reference — no download/re-upload.
 
 Accuracy: nothing skipped, correct order, albums kept together. Speed: an
 adaptive throttle keeps the copy near the fastest rate the account tolerates
@@ -14,9 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
-import uuid
 from functools import partial
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, TypeVar
@@ -183,13 +181,6 @@ async def _collect_units(client: Client, source_id: int) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # Sending (fast path vs transform path)
 # --------------------------------------------------------------------------- #
-def _media_type(msg) -> Optional[str]:
-    for name in ("video", "document", "animation", "photo", "audio", "voice", "sticker", "video_note"):
-        if getattr(msg, name, None):
-            return name
-    return None
-
-
 def _build_input_media(m, caption: str):
     if m.photo:
         return InputMediaPhoto(m.photo.file_id, caption=caption, parse_mode=_HTML)
@@ -200,44 +191,6 @@ def _build_input_media(m, caption: str):
     if m.audio:
         return InputMediaAudio(m.audio.file_id, caption=caption, parse_mode=_HTML)
     return None
-
-
-async def _resend_with_thumbnail(
-    client: Client, msg, *, dest_id: int, topic_id: int, caption: str, thumb: str, media_type: str
-) -> None:
-    tmp = str(Path(thumb).parent / f"dl_{uuid.uuid4().hex}")
-    path = await client.download_media(msg, file_name=tmp)
-    try:
-        if media_type == "video":
-            v = msg.video
-            await client.send_video(
-                dest_id, path, thumb=thumb, caption=caption, parse_mode=_HTML,
-                duration=getattr(v, "duration", 0) or 0,
-                width=getattr(v, "width", 0) or 0,
-                height=getattr(v, "height", 0) or 0,
-                supports_streaming=True, message_thread_id=topic_id,
-            )
-        elif media_type == "animation":
-            a = msg.animation
-            await client.send_animation(
-                dest_id, path, thumb=thumb, caption=caption, parse_mode=_HTML,
-                duration=getattr(a, "duration", 0) or 0,
-                width=getattr(a, "width", 0) or 0,
-                height=getattr(a, "height", 0) or 0,
-                message_thread_id=topic_id,
-            )
-        else:  # document
-            d = msg.document
-            await client.send_document(
-                dest_id, path, thumb=thumb, caption=caption, parse_mode=_HTML,
-                file_name=getattr(d, "file_name", None), message_thread_id=topic_id,
-            )
-    finally:
-        if path and os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
 
 
 async def _send_single_transformed(
@@ -252,18 +205,11 @@ async def _send_single_transformed(
 
     original_caption = msg.caption.html if msg.caption else ""
     new_caption = transform_text(original_caption, settings)
-    media_type = _media_type(msg)
-
-    if settings.thumbnail_path and media_type in ("video", "document", "animation"):
-        await _resend_with_thumbnail(
-            client, msg, dest_id=dest_id, topic_id=topic_id,
-            caption=new_caption, thumb=settings.thumbnail_path, media_type=media_type,
-        )
-    else:
-        await client.copy_message(
-            chat_id=dest_id, from_chat_id=source_id, message_id=anchor,
-            caption=new_caption, parse_mode=_HTML, message_thread_id=topic_id,
-        )
+    # Reference-copy with a rewritten caption — no download/re-upload.
+    await client.copy_message(
+        chat_id=dest_id, from_chat_id=source_id, message_id=anchor,
+        caption=new_caption, parse_mode=_HTML, message_thread_id=topic_id,
+    )
 
 
 async def _send_album_transformed(

@@ -32,7 +32,6 @@ class State(Enum):
     SET_WORD_REPLACE = auto()
     SET_LINK_REPLACE = auto()
     SET_CAPTION_TEXT = auto()
-    SET_THUMBNAIL = auto()
 
 
 @dataclass

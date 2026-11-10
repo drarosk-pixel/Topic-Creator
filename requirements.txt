@@ -4,5 +4,3 @@ kurigram==2.2.3
 TgCrypto==1.2.5
 # .env loading
 python-dotenv==1.0.1
-# Thumbnail resizing to a valid Telegram thumb (<=320px JPEG)
-Pillow==11.0.0

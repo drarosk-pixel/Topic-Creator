@@ -59,7 +59,3 @@ class Config:
     @property
     def settings_file(self) -> Path:
         return self.sessions_dir / "settings.json"
-
-    @property
-    def thumbnail_file(self) -> Path:
-        return self.sessions_dir / "thumb.jpg"
