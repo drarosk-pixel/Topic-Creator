@@ -311,6 +311,8 @@ def _active_transforms_note(ctx: AppContext) -> str:
         active.append(f"word×{len(s.word_replace)}")
     if s.link_replace:
         active.append(f"link×{len(s.link_replace)}")
+    if s.remove_lines:
+        active.append(f"remove-lines×{len(s.remove_lines)}")
     if s.caption_mode != "off" and s.caption_text:
         active.append(f"caption:{s.caption_mode}")
     if not active:

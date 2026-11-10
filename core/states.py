@@ -31,6 +31,7 @@ class State(Enum):
     # --- settings sub-flow ---
     SET_WORD_REPLACE = auto()
     SET_LINK_REPLACE = auto()
+    SET_REMOVE_LINES = auto()
     SET_CAPTION_TEXT = auto()
 
 

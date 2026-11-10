@@ -100,6 +100,10 @@ messages are reference-copied, nothing is downloaded or re-uploaded.
   without `=>` deletes that text. Applies to message text and captions.
 - **🔗 Link replace** — swap links (`https://old => https://new`). Works on links
   inside text and captions.
+- **🧹 Remove lines** — phrases (one per line). Any caption/text **line** that
+  contains one is deleted entirely, including a **hidden hyperlink** on that
+  line. Ideal for stripping a promo line like *Join [Medical Verse] For more*
+  while keeping the real title. Add phrases such as `Join`, `For more`.
 - **🏷 Caption** — add a caption and choose how: **Append**, **Prepend**, or
   **Replace** the original. Supports HTML (`<b>…</b>`, `<a href="…">…</a>`).
 

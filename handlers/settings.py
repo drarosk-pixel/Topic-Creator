@@ -53,6 +53,7 @@ async def on_callback(ctx: AppContext, bot: Client, cq: CallbackQuery, session: 
     if data == "set:clearall":
         ctx.settings.word_replace = []
         ctx.settings.link_replace = []
+        ctx.settings.remove_lines = []
         ctx.settings.caption_text = ""
         ctx.settings.caption_mode = "off"
         ctx.settings.save(ctx.cfg.settings_file)
@@ -84,6 +85,22 @@ async def on_callback(ctx: AppContext, bot: Client, cq: CallbackQuery, session: 
             "• Matches links in text and captions.\n"
             "• This **replaces** the whole list.\n"
             "• Send `clear` to remove all rules.\n\n"
+            "Send /cancel to go back."
+        )
+        return
+
+    if data == "set:removelines":
+        session.state = State.SET_REMOVE_LINES
+        await cq.answer()
+        await cq.message.edit_text(
+            "🧹 **Remove lines**\n\n"
+            "Send phrases, one per line. Any caption/text **line** that contains "
+            "one of them is removed completely — including a hidden hyperlink on "
+            "that line.\n\n"
+            "Example (to kill a promo line like *Join Medical Verse For more*):\n"
+            "`Join`\n`For more`\n`Medical Verse`\n\n"
+            "• This **replaces** the whole list.\n"
+            "• Send `clear` to remove all phrases.\n\n"
             "Send /cancel to go back."
         )
         return
@@ -146,6 +163,20 @@ async def on_text(ctx: AppContext, bot: Client, message: Message, session: Sessi
         ctx.settings.save(ctx.cfg.settings_file)
         await message.reply(
             f"✅ Link replace saved ({len(ctx.settings.link_replace)} rule(s)).\n\n"
+            + _MENU_HEADER + summary(ctx.settings),
+            reply_markup=settings_menu_keyboard(),
+        )
+        return
+
+    if session.state is State.SET_REMOVE_LINES:
+        if text.strip().lower() == "clear":
+            ctx.settings.remove_lines = []
+        else:
+            ctx.settings.remove_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        session.state = State.IDLE
+        ctx.settings.save(ctx.cfg.settings_file)
+        await message.reply(
+            f"✅ Remove-lines saved ({len(ctx.settings.remove_lines)} phrase(s)).\n\n"
             + _MENU_HEADER + summary(ctx.settings),
             reply_markup=settings_menu_keyboard(),
         )
